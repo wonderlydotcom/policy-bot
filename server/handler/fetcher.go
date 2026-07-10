@@ -109,7 +109,7 @@ func isServerError(err error) bool {
 	var ghErr *github.ErrorResponse
 	if errors.As(err, &ghErr) {
 		switch ghErr.Response.StatusCode {
-		case http.StatusInternalServerError, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			return true
 		}
 	}
