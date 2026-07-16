@@ -42,7 +42,7 @@ func TestParseConfigPostsStatusForSeenPolicy(t *testing.T) {
 	assert.Nil(t, evaluator)
 	require.NotNil(t, ec.Status)
 	assert.Equal(t, "error", ec.Status.GetState())
-	assert.Equal(t, "policy-bot: main", ec.Status.GetContext())
+	assert.Equal(t, "policy-bot", ec.Status.GetContext())
 	assert.Equal(t, "Error loading policy from testorg/testrepo@main", ec.Status.GetDescription())
 }
 
