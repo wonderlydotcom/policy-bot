@@ -31,10 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptr[T any](v T) *T {
-	return &v
-}
-
 var defaultOptions = Options{
 	Methods: DefaultMethods(),
 }

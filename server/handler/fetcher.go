@@ -66,7 +66,7 @@ func (cf *ConfigFetcher) ConfigForRepositoryBranch(ctx context.Context, client *
 
 		if err != nil {
 			fc.SeenPolicy = cf.SeenPolicyCache.Get(key)
-			if !os.IsTimeout(err) && !isServerError(err) {
+			if !os.IsTimeout(err) && !isRetryableError(err) {
 				fc.LoadError = err
 				return fc
 			}
@@ -105,12 +105,17 @@ func (cf *ConfigFetcher) ConfigForRepositoryBranch(ctx context.Context, client *
 	}
 }
 
-func isServerError(err error) bool {
+func isRetryableError(err error) bool {
 	var ghErr *github.ErrorResponse
 	if errors.As(err, &ghErr) {
 		switch ghErr.Response.StatusCode {
 		case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			return true
+		case http.StatusBadRequest:
+			// A 400 carrying no message and no field errors is not a rejection of
+			// this request: GitHub always explains a genuine 400. Retry only that
+			// shape so real client errors still fail immediately.
+			return ghErr.Message == "" && len(ghErr.Errors) == 0
 		}
 	}
 	return false

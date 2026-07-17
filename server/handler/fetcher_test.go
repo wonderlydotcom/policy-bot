@@ -120,7 +120,15 @@ func githubStatusError(code int) error {
 	}
 }
 
-func TestIsServerError(t *testing.T) {
+func githubBodyError(code int, message string, errs ...github.Error) error {
+	return &github.ErrorResponse{
+		Response: &http.Response{StatusCode: code},
+		Message:  message,
+		Errors:   errs,
+	}
+}
+
+func TestIsRetryableError(t *testing.T) {
 	for _, test := range []struct {
 		code      int
 		retryable bool
@@ -133,10 +141,16 @@ func TestIsServerError(t *testing.T) {
 		{http.StatusNotFound, false},
 		{http.StatusUnprocessableEntity, false},
 	} {
-		assert.Equal(t, test.retryable, isServerError(githubStatusError(test.code)), "status %d", test.code)
+		assert.Equal(t, test.retryable, isRetryableError(githubStatusError(test.code)), "status %d", test.code)
 	}
 
-	assert.False(t, isServerError(errors.New("request failed")))
+	assert.False(t, isRetryableError(errors.New("request failed")))
+
+	// GitHub intermittently answers a valid request with a bodyless 400; a real
+	// 400 always says what was wrong with the request.
+	assert.True(t, isRetryableError(githubStatusError(http.StatusBadRequest)))
+	assert.False(t, isRetryableError(githubBodyError(http.StatusBadRequest, "Invalid request")))
+	assert.False(t, isRetryableError(githubBodyError(http.StatusBadRequest, "", github.Error{Field: "ref", Code: "invalid"})))
 }
 
 func TestConfigFetcherRetriesBadGateway(t *testing.T) {
@@ -164,4 +178,67 @@ func TestConfigFetcherRetriesBadGateway(t *testing.T) {
 	require.NoError(t, fc.ParseError)
 	assert.Equal(t, 2, calls)
 	assert.True(t, fc.SeenPolicy)
+}
+
+func TestConfigFetcherRetriesEmptyBadRequest(t *testing.T) {
+	calls := 0
+
+	fetcher := ConfigFetcher{
+		Loader: mockConfigLoader{
+			loadConfig: func(ctx context.Context, client *github.Client, owner, repo, ref string) (appconfig.Config, error) {
+				calls++
+				if calls == 1 {
+					return appconfig.Config{}, githubStatusError(http.StatusBadRequest)
+				}
+				return appconfig.Config{
+					Content: []byte("policy:\n  approval:\n    - rule\n"),
+					Source:  "testorg/testrepo@main",
+					Path:    ".policy.yml",
+				}, nil
+			},
+		},
+		SeenPolicyCache: NewSeenPolicyCache(),
+	}
+
+	fc := fetcher.ConfigForRepositoryBranch(context.Background(), nil, "testorg", "testrepo", "main")
+	require.NoError(t, fc.LoadError)
+	require.NoError(t, fc.ParseError)
+	assert.Equal(t, 2, calls)
+	assert.True(t, fc.SeenPolicy)
+}
+
+func TestConfigFetcherGivesUpOnPersistentEmptyBadRequest(t *testing.T) {
+	calls := 0
+
+	fetcher := ConfigFetcher{
+		Loader: mockConfigLoader{
+			loadConfig: func(ctx context.Context, client *github.Client, owner, repo, ref string) (appconfig.Config, error) {
+				calls++
+				return appconfig.Config{}, githubStatusError(http.StatusBadRequest)
+			},
+		},
+		SeenPolicyCache: NewSeenPolicyCache(),
+	}
+
+	fc := fetcher.ConfigForRepositoryBranch(context.Background(), nil, "testorg", "testrepo", "main")
+	require.Error(t, fc.LoadError)
+	assert.Equal(t, 4, calls)
+}
+
+func TestConfigFetcherDoesNotRetryMeaningfulBadRequest(t *testing.T) {
+	calls := 0
+
+	fetcher := ConfigFetcher{
+		Loader: mockConfigLoader{
+			loadConfig: func(ctx context.Context, client *github.Client, owner, repo, ref string) (appconfig.Config, error) {
+				calls++
+				return appconfig.Config{}, githubBodyError(http.StatusBadRequest, "Invalid request")
+			},
+		},
+		SeenPolicyCache: NewSeenPolicyCache(),
+	}
+
+	fc := fetcher.ConfigForRepositoryBranch(context.Background(), nil, "testorg", "testrepo", "main")
+	require.Error(t, fc.LoadError)
+	assert.Equal(t, 1, calls)
 }

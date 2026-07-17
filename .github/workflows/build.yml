@@ -114,6 +114,7 @@ jobs:
     # Include them here to avoid exporting the Docker container as an artifact
     #
     - name: Login to GCR
+      if: ${{ github.event_name != 'pull_request' }}
       uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
       with:
         registry: gcr.io
@@ -121,6 +122,7 @@ jobs:
         password: ${{ secrets.GCR_JSON_KEY }}
 
     - name: Push release image to gcr
+      if: ${{ github.event_name != 'pull_request' }}
       run: ./godelw docker push --tags=latest,version
 
   ci-all:
